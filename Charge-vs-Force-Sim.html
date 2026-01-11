@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Charge vs Force — Visual Simulation</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 18px; }
+    .wrap { display: grid; grid-template-columns: 640px 1fr; gap: 16px; align-items: start; }
+    canvas { border: 1px solid #ccc; border-radius: 14px; background: #fff; }
+    .card { border: 1px solid #ddd; border-radius: 14px; padding: 14px; background: #fafafa; }
+    label { display:block; margin-top: 10px; font-weight: 800; }
+    input[type="range"] { width: 100%; }
+    .row { display:flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    button { padding: 10px 12px; border-radius: 10px; border: 1px solid #bbb; background: white; cursor:pointer; }
+    button:hover { background:#f2f2f2; }
+    .kvs { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+    .kv { border: 1px solid #ddd; border-radius: 12px; background:#fff; padding: 10px; }
+    .kv .k { font-size: 0.9rem; color:#444; }
+    .kv .v { font-size: 1.35rem; font-weight: 950; }
+    .small { font-size: 0.92rem; color:#333; line-height: 1.35; }
+    .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+    textarea { width: 100%; height: 84px; border-radius: 12px; border: 1px solid #ccc; padding: 10px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; background:#fff; border-radius: 12px; overflow: hidden; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: center; }
+    th { background:#f2f2f2; }
+    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; border:1px solid #ddd; background:#fff; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <h2>Charge vs Electrostatic Force — Visual Simulation (Students can grab data)</h2>
+
+  <div class="wrap">
+    <canvas id="c" width="640" height="520"></canvas>
+
+    <div class="card">
+      <p class="small">
+        Move the <b>Charge slider</b>. You’ll see <b>charge “dots”</b> get added and the <b>force vector</b> grow.
+        Use <span class="pill">Copy current data</span> or add points to the table.
+      </p>
+
+      <label for="q1">Charge on Object A, q₁ (µC): <span id="q1Val" class="mono"></span></label>
+      <input id="q1" type="range" min="0" max="10" step="0.5" value="2.0" />
+
+      <label for="q2">Charge on Object B, q₂ (µC): <span id="q2Val" class="mono"></span></label>
+      <input id="q2" type="range" min="0" max="10" step="0.5" value="2.0" />
+
+      <label>Interaction (signs):</label>
+      <div class="row">
+        <label><input type="radio" name="mode" value="attract" checked> Attraction (+ and −)</label>
+        <label><input type="radio" name="mode" value="repel"> Repulsion (+ and +)</label>
+      </div>
+
+      <label for="r">Distance r (cm): <span id="rVal" class="mono"></span></label>
+      <input id="r" type="range" min="5" max="40" step="1" value="20" disabled />
+
+      <div class="row">
+        <button id="toggleR">Unlock distance</button>
+        <button id="copyNow">Copy current data</button>
+        <button id="addRow">Add to data table</button>
+        <button id="copyTable">Copy table</button>
+        <button id="csvBtn">Download CSV</button>
+        <button id="clearBtn">Clear table</button>
+      </div>
+
+      <div class="kvs">
+        <div class="kv">
+          <div class="k">Force magnitude |F| (N)</div>
+          <div class="v" id="fOut">—</div>
+        </div>
+        <div class="kv">
+          <div class="k">Suggested graph</div>
+          <div class="v" id="graphHint">F vs q₁</div>
+        </div>
+      </div>
+
+      <label>Current data (students can grab this):</label>
+      <textarea id="dataBox" readonly></textarea>
+
+      <table id="tbl">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>q₁ (µC)</th>
+            <th>q₂ (µC)</th>
+            <th>r (cm)</th>
+            <th>|F| (N)</th>
+            <th>Type</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+
+      <p class="small" style="margin-top:10px;">
+        For a clean “Charge vs Force” relationship: keep <b>q₂</b> constant and keep <b>r locked</b>. Only change <b>q₁</b>.
+      </p>
+    </div>
+  </div>
+
+<script>
+  // ---------- UI ----------
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+
+  const q1 = document.getElementById("q1");
+  const q2 = document.getElementById("q2");
+  const r  = document.getElementById("r");
+
+  const q1Val = document.getElementById("q1Val");
+  const q2Val = document.getElementById("q2Val");
+  const rVal  = document.getElementById("rVal");
+  const fOut  = document.getElementById("fOut");
+  const dataBox = document.getElementById("dataBox");
+  const graphHint = document.getElementById("graphHint");
+
+  const toggleR = document.getElementById("toggleR");
+  const copyNow = document.getElementById("copyNow");
+  const addRow  = document.getElementById("addRow");
+  const copyTable = document.getElementById("copyTable");
+  const csvBtn = document.getElementById("csvBtn");
+  const clearBtn = document.getElementById("clearBtn");
+  const tblBody = document.querySelector("#tbl tbody");
+
+  function mode() {
+    return document.querySelector('input[name="mode"]:checked').value; // attract or repel
+  }
+
+  // ---------- Model ----------
+  // Use Coulomb constant, but we’ll also cap visuals so arrows don’t explode.
+  const k = 8.99e9; // N m^2 / C^2
+
+  function readInputs() {
+    const q1_uc = parseFloat(q1.value);
+    const q2_uc = parseFloat(q2.value);
+    const r_cm  = parseFloat(r.value);
+
+    const q1_C = q1_uc * 1e-6;
+    const q2_C = q2_uc * 1e-6;
+    const r_m = Math.max(0.01, r_cm / 100);
+
+    const F = (k * Math.abs(q1_C * q2_C)) / (r_m * r_m);
+    return { q1_uc, q2_uc, r_cm, r_m, F, type: mode() };
+  }
+
+  // ---------- Visual charge dots ----------
+  // We pre-generate dot locations on each sphere (so dots look stable).
+  function seededDots(seed, count, centerX, centerY, radius) {
+    // Simple deterministic pseudo-random
+    let x = seed * 99991 + 17;
+    function rand() { x = (x * 48271) % 2147483647; return x / 2147483647; }
+
+    const pts = [];
+    for (let i = 0; i < count; i++) {
+      // random point in circle
+      const t = 2 * Math.PI * rand();
+      const u = rand() + rand();
+      const rr = (u > 1 ? 2 - u : u) * (radius * 0.78);
+      pts.push({ x: centerX + rr * Math.cos(t), y: centerY + rr * Math.sin(t) });
+    }
+    return pts;
+  }
+
+  const A = { x: 180, y: 260, R: 56 };
+  const B = { x: 460, y: 260, R: 56 };
+
+  const dotPoolA = seededDots(1, 30, A.x, A.y, A.R);
+  const dotPoolB = seededDots(2, 30, B.x, B.y, B.R);
+
+  function dotCountFromCharge(q_uc) {
+    // 0–10 µC maps to 0–20 dots (enough to visibly “add charge”)
+    return Math.max(0, Math.min(20, Math.round(q_uc * 2)));
+  }
+
+  // ---------- Drawing helpers ----------
+  function drawArrow(x1, y1, x2, y2, label) {
+    ctx.save();
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = "#d33";
+    ctx.fillStyle = "#d33";
+
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+
+    const ang = Math.atan2(y2 - y1, x2 - x1);
+    const head = 14;
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - head*Math.cos(ang - Math.PI/7), y2 - head*Math.sin(ang - Math.PI/7));
+    ctx.lineTo(x2 - head*Math.cos(ang + Math.PI/7), y2 - head*Math.sin(ang + Math.PI/7));
+    ctx.closePath();
+    ctx.fill();
+
+    if (label) {
+      ctx.font = "bold 14px system-ui, Arial";
+      ctx.fillText(label, x2 + 10, y2 - 10);
+    }
+    ctx.restore();
+  }
+
+  function drawChargeSphere(center, label, q_uc, signChar, dots, dotSign) {
+    // sphere
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, center.R, 0, Math.PI*2);
+    ctx.fillStyle = "#2b6";
+    ctx.fill();
+    ctx.strokeStyle = "#195";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    // label + sign
+    ctx.fillStyle = "#111";
+    ctx.font = "bold 14px system-ui, Arial";
+    ctx.fillText(label, center.x - 10, center.y - center.R - 16);
+
+    ctx.font = "bold 22px system-ui, Arial";
+    ctx.fillText(signChar, center.x - 8, center.y + 8);
+
+    // charge value
+    ctx.font = "13px ui-monospace, Menlo, Consolas, monospace";
+    ctx.fillText(`${q_uc.toFixed(1)} µC`, center.x - 40, center.y + center.R + 18);
+
+    // dots (visual “added charge”)
+    ctx.font = "bold 14px system-ui, Arial";
+    ctx.fillText("Added charge:", center.x - 50, center.y + center.R + 42);
+
+    ctx.fillStyle = "#111";
+    for (let i = 0; i < dots; i++) {
+      const p = (center === A) ? dotPoolA[i] : dotPoolB[i];
+      // tiny dot
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 5, 0, Math.PI*2);
+      ctx.fillStyle = "#fff";
+      ctx.fill();
+      ctx.strokeStyle = "#111";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // sign in dot
+      ctx.fillStyle = "#111";
+      ctx.font = "bold 12px system-ui, Arial";
+      ctx.fillText(dotSign, p.x - 4, p.y + 4);
+    }
+
+    ctx.restore();
+  }
+
+  function drawScene() {
+    const { q1_uc, q2_uc, r_cm, F, type } = readInputs();
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // subtle grid
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    ctx.strokeStyle = "#999";
+    for (let x = 20; x < canvas.width; x += 40) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+    }
+    for (let y = 20; y < canvas.height; y += 40) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+    }
+    ctx.restore();
+
+    // Title
+    ctx.save();
+    ctx.fillStyle = "#111";
+    ctx.font = "bold 18px system-ui, Arial";
+    ctx.fillText("Add charge → Force increases", 18, 30);
+    ctx.font = "14px system-ui, Arial";
+    ctx.fillText("Red arrow shows electrostatic force", 18, 54);
+    ctx.restore();
+
+    // Distance guide line
+    ctx.save();
+    ctx.strokeStyle = "#666";
+    ctx.setLineDash([7,7]);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(A.x, A.y + 95);
+    ctx.lineTo(B.x, B.y + 95);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#444";
+    ctx.font = "14px ui-monospace, Menlo, Consolas, monospace";
+    ctx.fillText(`r = ${r_cm.toFixed(0)} cm`, (A.x+B.x)/2 - 40, A.y + 122);
+    ctx.restore();
+
+    // Determine signs for display
+    const signA = "+";
+    const signB = (type === "attract") ? "−" : "+";
+
+    // Number of charge dots
+    const dotsA = dotCountFromCharge(q1_uc);
+    const dotsB = dotCountFromCharge(q2_uc);
+
+    // Dot sign
+    const dotSignA = "+";
+    const dotSignB = (type === "attract") ? "−" : "+";
+
+    // Draw spheres with dots
+    drawChargeSphere(A, "Object A", q1_uc, signA, dotsA, dotSignA);
+    drawChargeSphere(B, "Object B", q2_uc, signB, dotsB, dotSignB);
+
+    // Force arrow scaling (compress so visuals remain readable)
+    // Use a log scale so doubling charge still obviously increases arrow length.
+    const arrowLen = Math.min(220, 30 * Math.log10(1 + F * 50));
+    const dir = (type === "attract") ? 1 : -1;
+
+    // Force on A: toward B if attract, away if repel
+    drawArrow(A.x + A.R, A.y, A.x + A.R + dir*arrowLen, A.y, "F");
+
+    // Force on B opposite direction
+    drawArrow(B.x - B.R, B.y, B.x - B.R - dir*arrowLen, B.y, "F");
+
+    // Force magnitude text
+    ctx.save();
+    ctx.fillStyle = "#111";
+    ctx.font = "bold 16px system-ui, Arial";
+    ctx.fillText(`|F| = ${formatForce(F)} N`, 18, 84);
+    ctx.restore();
+  }
+
+  function formatForce(F) {
+    if (F === 0) return "0";
+    if (F < 0.001) return F.toExponential(2);
+    if (F < 1) return F.toFixed(4);
+    if (F < 100) return F.toFixed(2);
+    return F.toExponential(2);
+  }
+
+  // ---------- Data panel + copy ----------
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      // quick feedback
+      copyNow.textContent = "Copied!";
+      setTimeout(() => (copyNow.textContent = "Copy current data"), 900);
+    } catch {
+      // fallback: select textarea text
+      dataBox.focus();
+      dataBox.select();
+      document.execCommand("copy");
+      copyNow.textContent = "Copied!";
+      setTimeout(() => (copyNow.textContent = "Copy current data"), 900);
+    }
+  }
+
+  function updateDataBox() {
+    const { q1_uc, q2_uc, r_cm, F, type } = readInputs();
+    // CSV-like single line (easy to paste into Sheets)
+    dataBox.value =
+      `q1_uC,q2_uC,r_cm,F_N,type\n` +
+      `${q1_uc.toFixed(1)},${q2_uc.toFixed(1)},${r_cm.toFixed(0)},${(F<0.001?F.toExponential(2):F.toFixed(6))},${type}`;
+  }
+
+  // ---------- Table ----------
+  function addRowToTable() {
+    const { q1_uc, q2_uc, r_cm, F, type } = readInputs();
+    const n = tblBody.children.length + 1;
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${n}</td>
+      <td>${q1_uc.toFixed(1)}</td>
+      <td>${q2_uc.toFixed(1)}</td>
+      <td>${r_cm.toFixed(0)}</td>
+      <td>${(F < 0.001) ? F.toExponential(2) : F.toFixed(6)}</td>
+      <td>${type}</td>
+    `;
+    tblBody.appendChild(tr);
+  }
+
+  function copyTableText() {
+    const header = "Trial\tq1_uC\tq2_uC\tr_cm\tF_N\ttype";
+    const rows = [...tblBody.querySelectorAll("tr")].map(tr =>
+      [...tr.querySelectorAll("td")].map(td => td.textContent).join("\t")
+    );
+    return [header, ...rows].join("\n");
+  }
+
+  function downloadCSV() {
+    const rows = [["Trial","q1_uC","q2_uC","r_cm","F_N","type"]];
+    [...tblBody.querySelectorAll("tr")].forEach(tr => {
+      rows.push([...tr.querySelectorAll("td")].map(td => td.textContent));
+    });
+    const csv = rows.map(r => r.join(",")).join("\n");
+    const blob = new Blob([csv], {type:"text/csv"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "charge_vs_force_data.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function clearTable() { tblBody.innerHTML = ""; }
+
+  // ---------- Distance lock ----------
+  let locked = true;
+  function toggleDistance() {
+    locked = !locked;
+    r.disabled = locked;
+    toggleR.textContent = locked ? "Unlock distance" : "Lock distance";
+    graphHint.textContent = locked ? "F vs q₁" : "F vs q and r";
+  }
+
+  // ---------- UI refresh ----------
+  function refresh() {
+    q1Val.textContent = parseFloat(q1.value).toFixed(1);
+    q2Val.textContent = parseFloat(q2.value).toFixed(1);
+    rVal.textContent = parseFloat(r.value).toFixed(0);
+
+    const { F } = readInputs();
+    fOut.textContent = `${formatForce(F)} N`;
+
+    updateDataBox();
+    drawScene();
+  }
+
+  // ---------- Events ----------
+  [q1,q2,r].forEach(el => el.addEventListener("input", refresh));
+  document.querySelectorAll('input[name="mode"]').forEach(el => el.addEventListener("change", refresh));
+
+  toggleR.addEventListener("click", () => { toggleDistance(); refresh(); });
+  copyNow.addEventListener("click", () => copyText(dataBox.value));
+  addRow.addEventListener("click", addRowToTable);
+  copyTable.addEventListener("click", () => copyText(copyTableText()));
+  csvBtn.addEventListener("click", downloadCSV);
+  clearBtn.addEventListener("click", clearTable);
+
+  // init
+  refresh();
+</script>
+</body>
+</html>
